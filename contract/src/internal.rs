@@ -8,7 +8,7 @@ impl Lockup {
 
     pub(crate) fn internal_deposit(&mut self, token_id: AccountId, amount: Balance) {
         let mut token = self.tokens.get(&token_id).expect("token not exist");
-        token.balance += amount;
+        token += amount;
         self.tokens.insert(&token_id, &token);
     }
 
@@ -24,12 +24,12 @@ impl Lockup {
 #[near_bindgen]
 impl Lockup {
     #[private]
-    pub fn on_claim(&mut self, token_id: AccountId, task_index: u32, claimer_id: AccountId, amount: U128) {
+    pub fn on_claim(&mut self, token_id: AccountId, hash: Base58CryptoHash, claimer_id: AccountId, amount: U128) {
         match env::promise_result(0) {
             PromiseResult::NotReady => unreachable!(),
             PromiseResult::Successful(_) => {
                 let mut token = self.tokens.get(&token_id).unwrap();
-                let mut task = token.tasks.get(task_index as u64).unwrap();
+                let mut task = self.tasks.get(&hash).unwrap();
                 let mut claim_info = task.accounts.get(&claimer_id).unwrap();
                 claim_info.amount_left -= u128::from(amount);
                 claim_info.claim_time = env::block_timestamp();
@@ -50,10 +50,7 @@ impl Lockup {
         match env::promise_result(0) {
             PromiseResult::NotReady => unreachable!(),
             PromiseResult::Successful(_) => {
-                self.tokens.insert(&token_id, &LockupInfo {
-                    tasks: Vector::new(("t".to_string() + &token_id).into_bytes()),
-                    balance: 0,
-                });
+                self.tokens.insert(&token_id, &0);
             },
             PromiseResult::Failed => {
                 log!("failed to add token");

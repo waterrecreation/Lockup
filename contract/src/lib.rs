@@ -16,7 +16,7 @@ use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
 use near_sdk::{AccountId, PanicOnDefault, env, ext_contract, log, near_bindgen, setup_alloc};
 use near_sdk::collections::{LookupMap, UnorderedMap, Vector};
 use near_sdk::serde::{Serialize, Deserialize};
-use near_sdk::json_types::{U64, U128, ValidAccountId};
+use near_sdk::json_types::{Base58CryptoHash, U128, U64, ValidAccountId};
 use near_contract_standards::fungible_token::metadata::{FungibleTokenMetadata};
 use near_contract_standards::fungible_token::receiver::FungibleTokenReceiver;
 use utils::get_claim_amount;
@@ -33,13 +33,8 @@ pub mod view;
 #[derive(BorshDeserialize, BorshSerialize, PanicOnDefault)]
 pub struct Lockup {
     owner_id: AccountId,
-    tokens: UnorderedMap<AccountId, LockupInfo>,
-}
-
-#[derive(BorshDeserialize, BorshSerialize)]
-pub struct LockupInfo {
-    tasks: Vector<Task>,
-    balance: u128,
+    tokens: UnorderedMap<AccountId, u128>,
+    tasks: UnorderedMap<Base58CryptoHash, Task>,
 }
 
 #[derive(BorshDeserialize, BorshSerialize)]
@@ -84,7 +79,7 @@ pub trait FungibleTokenContract {
 
 #[ext_contract(ext_self)]
 pub trait ExtSelf {
-    fn on_claim(&mut self, token_id: AccountId, task_index: u32, claimer_id: AccountId, amount: U128);
+    fn on_claim(&mut self, token_id: AccountId, hash: Base58CryptoHash, claimer_id: AccountId, amount: U128);
 
     fn on_add_token(&mut self, token_id: AccountId);
 }
@@ -95,7 +90,8 @@ impl Lockup {
     pub fn new(owner_id: AccountId) -> Self {
         Self {
             owner_id,
-            tokens: UnorderedMap::new(b't')
+            tokens: UnorderedMap::new(b't'),
+            tasks: UnorderedMap::new(b'a')
         }
     }
 
@@ -106,14 +102,15 @@ impl Lockup {
         self.internal_add_token(token_id.clone());
     }
 
-    pub fn add_task(&mut self, token_id: AccountId, account_list: Vec<AccountId>, start_time: U64, end_time: U64, vesting_period: U64, amount: U128) {
+    pub fn add_task(&mut self, token_id: AccountId, account_list: Vec<AccountId>, start_time: U64, end_time: U64, vesting_period: U64, amount: U128, hash: Base58CryptoHash) {
         assert!(self.owner_id == env::predecessor_account_id(), "contract owner only");
         let mut token = self.tokens.get(&token_id).unwrap();
         let start_time: u64 = start_time.into();
         let end_time: u64 = end_time.into();
         let amount: u128 = amount.into();
         let vesting_period: u64 = vesting_period.into();
-        assert!(token.balance >= amount, "not enough balance");
+        assert!(self.tasks.get(&hash).is_none(), "task exist");
+        assert!(token >= amount, "not enough balance");
         assert!(start_time < end_time, "start time should larger than end time");
         assert!(end_time - start_time >= vesting_period, "total duration must be larger than a single vesting period");
         assert!(account_list.len() > 0, "list length should greater than 0");
@@ -121,7 +118,7 @@ impl Lockup {
         let claim_count = ((end_time - start_time) / vesting_period) as u128;
         let single_claim_amount = single_account_amount / claim_count;
         
-        let key_prefix = token_id.clone() + &token.tasks.len().to_string();
+        let key_prefix = token_id.clone() + &self.tasks.len().to_string();
         let mut accounts = LookupMap::new(key_prefix.into_bytes());
         for account in account_list {
             accounts.insert(&account, &ClaimInfo {
@@ -129,8 +126,8 @@ impl Lockup {
                 claim_time: start_time
             });
         }
-        token.balance -= amount;
-        token.tasks.push(&Task { 
+        token -= amount;
+        self.tasks.insert(&hash, &Task { 
             token_id: token_id.clone(), 
             accounts: accounts, 
             start_time: start_time.into(), 
@@ -142,15 +139,15 @@ impl Lockup {
         self.tokens.insert(&token_id, &token);
     }
 
-    pub fn claim(&mut self, token_id: AccountId, task_index: u32) {
+    pub fn claim(&mut self, token_id: AccountId, hash: Base58CryptoHash) {
         let sender = env::predecessor_account_id();
-        let task = self.tokens.get(&token_id).unwrap().tasks.get(task_index as u64).unwrap();
+        let task = self.tasks.get(&hash).unwrap();
         assert!(task.accounts.get(&sender).is_some(), "not allowed to claim");
         let claim_info = task.accounts.get(&sender).unwrap();
         let amount = get_claim_amount(&task, &claim_info);
         if u128::from(amount) > 0  {
             ext_fungible_token::ft_transfer(sender.clone(), amount.into(), None, &token_id, 1, env::prepaid_gas() / 3).then(
-                ext_self::on_claim(token_id, task_index, sender, amount, &env::current_account_id(), 0, env::prepaid_gas() / 3)
+                ext_self::on_claim(token_id, hash, sender, amount, &env::current_account_id(), 0, env::prepaid_gas() / 3)
             );
         }
         
