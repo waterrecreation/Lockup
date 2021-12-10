@@ -1,4 +1,3 @@
-use near_sdk::json_types::Base58PublicKey;
 
 use crate::*;
 
@@ -33,7 +32,7 @@ impl Lockup {
 #[near_bindgen]
 impl Lockup {
   pub fn get_token_list(&self) -> Vec<AccountId> {
-    self.tokens.keys().collect()
+    self.tokens.to_vec()
   }
 
   pub fn get_unclaimed_amounts(&self, sender: AccountId, public_keys: Vec<Base58CryptoHash>) -> Vec<TaskInfo> {
