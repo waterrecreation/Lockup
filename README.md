@@ -26,4 +26,4 @@ Creator should specify token, claim list, start time, close time, vesting period
 Claim acion checks if a user is in a given task, and check if there's any amount of token to be claimed. Then after claim, the task records the timestamp that user claims. 
 
 
-  [Facility-Factory]: https://github.com/27s-io/Facility-Factory
+  [Facility-Factory]: https://github.com/popula-io/Facility-Factory
