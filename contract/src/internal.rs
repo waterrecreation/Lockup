@@ -2,7 +2,7 @@
 
 
 use crate::*;
-use near_sdk::{Balance, PromiseOrValue, PromiseResult, json_types::ValidAccountId, serde_json};
+use near_sdk::{PromiseOrValue, PromiseResult, json_types::ValidAccountId, serde_json};
 
 #[derive(Serialize, Deserialize, BorshDeserialize, BorshSerialize)]
 #[serde(crate = "near_sdk::serde")]
@@ -13,20 +13,17 @@ pub struct TaskArgs {
     start_time: U64, 
     end_time: U64, 
     vesting_period: U64, 
-    amount: U128, 
-    hash: Base58CryptoHash
+    amount: U128
 }
 
 impl Lockup {
 
     pub(crate) fn internal_add_task(&mut self, task_args: TaskArgs, token_amount: u128) -> U128{
-        assert!(self.owner_id == env::predecessor_account_id(), "contract owner only");
         let mut token_amount = token_amount;
         let start_time: u64 = task_args.start_time.into();
         let end_time: u64 = task_args.end_time.into();
         let amount: u128 = task_args.amount.into();
         let vesting_period: u64 = task_args.vesting_period.into();
-        assert!(self.tasks.get(&task_args.hash).is_none(), "task exist");
         assert!(token_amount >= amount, "not enough balance");
         assert!(start_time < end_time, "start time should larger than end time");
         assert!(end_time - start_time >= vesting_period, "total duration must be larger than a single vesting period");
@@ -44,7 +41,7 @@ impl Lockup {
             });
         }
         token_amount -= amount;
-        self.tasks.insert(&task_args.hash, &Task { 
+        self.tasks.push(&Task { 
             token_id: task_args.token_id.clone(), 
             accounts: accounts, 
             start_time: start_time.into(), 
@@ -68,11 +65,11 @@ impl Lockup {
 #[near_bindgen]
 impl Lockup {
     #[private]
-    pub fn on_claim(&mut self, hash: Base58CryptoHash, claimer_id: AccountId, amount: U128) {
+    pub fn on_claim(&mut self, index: u32, claimer_id: AccountId, amount: U128) {
         match env::promise_result(0) {
             PromiseResult::NotReady => unreachable!(),
             PromiseResult::Successful(_) => {
-                let mut task = self.tasks.get(&hash).unwrap();
+                let mut task = self.tasks.get(index as u64).unwrap();
                 let mut claim_info = task.accounts.get(&claimer_id).unwrap();
                 claim_info.amount_left -= u128::from(amount);
                 claim_info.claim_time = env::block_timestamp();
@@ -113,6 +110,7 @@ impl FungibleTokenReceiver for Lockup {
         let token_in = env::predecessor_account_id();
         let task_args: TaskArgs = serde_json::from_str(&msg).unwrap();
         assert!(task_args.token_id == token_in, "token not match");
+        assert!(self.owner_id == sender_id.to_string(), "contract owner only");
         let amount_left = self.internal_add_task(task_args, amount.into());
         PromiseOrValue::Value(amount_left)
     }

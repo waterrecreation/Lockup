@@ -35,7 +35,7 @@ pub mod view;
 pub struct Lockup {
     owner_id: AccountId,
     tokens: Vector<AccountId>,
-    tasks: UnorderedMap<Base58CryptoHash, Task>,
+    tasks: Vector<Task>,
 }
 
 #[derive(BorshDeserialize, BorshSerialize)]
@@ -80,7 +80,7 @@ pub trait FungibleTokenContract {
 
 #[ext_contract(ext_self)]
 pub trait ExtSelf {
-    fn on_claim(&mut self, hash: Base58CryptoHash, claimer_id: AccountId, amount: U128);
+    fn on_claim(&mut self, index: u32, claimer_id: AccountId, amount: U128);
 
     fn on_add_token(&mut self, token_id: AccountId);
 }
@@ -92,7 +92,7 @@ impl Lockup {
         Self {
             owner_id,
             tokens: Vector::new(b't'),
-            tasks: UnorderedMap::new(b'a')
+            tasks: Vector::new(b'a')
         }
     }
 
@@ -103,15 +103,15 @@ impl Lockup {
         self.internal_add_token(token_id);
     }
 
-    pub fn claim(&mut self, token_id: AccountId, hash: Base58CryptoHash) {
+    pub fn claim(&mut self, token_id: AccountId, index: u32) {
         let sender = env::predecessor_account_id();
-        let task = self.tasks.get(&hash).unwrap();
+        let task = self.tasks.get(index as u64).unwrap();
         assert!(task.accounts.get(&sender).is_some(), "not allowed to claim");
         let claim_info = task.accounts.get(&sender).unwrap();
         let amount = get_claim_amount(&task, &claim_info);
         if u128::from(amount) > 0  {
             ext_fungible_token::ft_transfer(sender.clone(), amount.into(), None, &token_id, 1, env::prepaid_gas() / 3).then(
-                ext_self::on_claim(hash, sender, amount, &env::current_account_id(), 0, env::prepaid_gas() / 3)
+                ext_self::on_claim(index, sender, amount, &env::current_account_id(), 0, env::prepaid_gas() / 3)
             );
         }
         
